@@ -5,31 +5,25 @@
   <title>Visor Geográfico Profesional</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <!-- Leaflet core -->
+  <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
 
-  <!-- Leaflet-Geoman -->
+  <!-- Leaflet Geoman -->
   <link href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.13.0/dist/leaflet-geoman.css" rel="stylesheet">
   <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.13.0/dist/leaflet-geoman.min.js"></script>
 
+  <!-- Omnivore (KML, GPX, etc.) -->
+  <script src="https://unpkg.com/leaflet-omnivore@0.3.4/leaflet-omnivore.min.js"></script>
+
+  <!-- JSZip + shapefile-js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+  <script src="https://unpkg.com/shapefile@0.6.6/shapefile.js"></script>
+
   <style>
-    html, body, #map {
-      height: 100%;
-      margin: 0;
-      font-family: Arial, sans-serif;
-    }
+    html, body, #map { height: 100%; margin: 0; font-family: Arial, sans-serif; }
+    #map { position: absolute; top: 0; bottom: 0; right: 0; left: 0; }
 
-    #map {
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      right: 0;
-      left: 0;
-      z-index: 0;
-    }
-
-    /* Panel flotante para capas */
     #layer-panel {
       position: absolute;
       bottom: 20px;
@@ -41,22 +35,17 @@
       box-shadow: 0 2px 8px rgba(0,0,0,0.3);
       max-height: 250px;
       overflow-y: auto;
-      width: 220px;
+      width: 230px;
     }
 
-    #layer-panel h3 {
-      margin: 0 0 10px;
-      font-size: 15px;
-    }
+    #layer-panel h3 { margin: 0 0 10px; font-size: 15px; }
 
-    .layer-item {
-      margin-bottom: 6px;
-    }
+    .layer-item { margin-bottom: 6px; }
 
     .upload-btn {
       display: inline-block;
       padding: 6px 10px;
-      background-color: #28a745;
+      background-color: #007bff;
       color: white;
       border-radius: 4px;
       cursor: pointer;
@@ -64,36 +53,26 @@
       margin-top: 8px;
     }
 
-    .upload-btn:hover {
-      background-color: #218838;
-    }
+    .upload-btn:hover { background-color: #0056b3; }
 
-    #file-input {
-      display: none;
-    }
+    #file-input { display: none; }
 
-    /* Espacio para zoom del mapa */
-    .leaflet-control-zoom {
-      margin-top: 60px;
-    }
+    .leaflet-control-zoom { margin-top: 60px; }
   </style>
 </head>
 <body>
-
   <div id="map"></div>
 
-  <!-- Panel lateral de capas -->
   <div id="layer-panel">
-    <h3>Capas CSV</h3>
+    <h3>Capas cargadas</h3>
     <div id="layerList"></div>
-    <label for="file-input" class="upload-btn">+ Cargar CSV</label>
-    <input type="file" id="file-input" accept=".csv" />
+    <label for="file-input" class="upload-btn">+ Cargar capa</label>
+    <input type="file" id="file-input" multiple accept=".csv,.kml,.kmz,.gpx,.zip" />
   </div>
 
   <script>
     const map = L.map('map').setView([-38, -64], 5);
 
-    // Capas base
     const googleSat = L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
       subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
       attribution: "Google",
@@ -107,100 +86,161 @@
       attribution: "IGN"
     });
 
+    const vientoCanada = L.tileLayer.wms("https://geoappext.nrcan.gc.ca/arcgis/services/Energy/clean_energy_wind_potential/MapServer/WMSServer", {
+      layers: "2",
+      format: "image/png",
+      transparent: true,
+      attribution: "Natural Resources Canada"
+    });
+
     const baseMaps = {
       "Google Satélite": googleSat,
-      "IGN": ign
+      "IGN": ign,
+      "Vientos Canadá": vientoCanada
     };
 
     L.control.layers(baseMaps, null, { position: "topright" }).addTo(map);
 
-    // Carga CSV
     const dynamicLayers = {};
 
-    document.getElementById("file-input").addEventListener("change", function (e) {
-      const file = e.target.files[0];
-      if (!file) return;
+    function addLayerToPanel(name, layerId, layer) {
+      const layerList = document.getElementById('layerList');
+      const div = document.createElement('div');
+      div.className = 'layer-item';
 
-      const reader = new FileReader();
-      reader.onload = function (event) {
-        const csv = event.target.result;
-        const lines = csv.trim().split("\n");
-        const delimiter = lines[0].includes(";") ? ";" : ",";
-        const headers = lines[0].split(delimiter);
-        const layer = L.layerGroup();
-        const bounds = [];
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = true;
+      checkbox.id = layerId;
 
-        lines.slice(1).forEach(line => {
-          const values = line.split(delimiter);
-          const lat = parseFloat(values[0]);
-          const lon = parseFloat(values[1]);
+      const label = document.createElement('label');
+      label.htmlFor = layerId;
+      label.textContent = name;
 
-          if (!isNaN(lat) && !isNaN(lon)) {
-            const props = headers.slice(2).map((h, i) => `<b>${h}:</b> ${values[i + 2] || ""}`).join("<br>");
-            const marker = L.circleMarker([lat, lon], {
-              radius: 7,
-              fillColor: "#FF3D00",
-              color: "#000",
-              weight: 1,
-              opacity: 1,
-              fillOpacity: 0.85
-            }).bindPopup(`<b>Lat:</b> ${lat}<br><b>Lon:</b> ${lon}<br>${props}`);
-            layer.addLayer(marker);
-            bounds.push([lat, lon]);
+      checkbox.addEventListener('change', function () {
+        if (this.checked) map.addLayer(layer);
+        else map.removeLayer(layer);
+      });
+
+      div.appendChild(checkbox);
+      div.appendChild(label);
+      layerList.appendChild(div);
+    }
+
+    function handleCSV(content, name) {
+      const lines = content.trim().split("\n");
+      const delimiter = lines[0].includes(";") ? ";" : ",";
+      const headers = lines[0].split(delimiter);
+      const layer = L.layerGroup();
+      const bounds = [];
+
+      lines.slice(1).forEach(line => {
+        const values = line.split(delimiter);
+        const lat = parseFloat(values[0]);
+        const lon = parseFloat(values[1]);
+
+        if (!isNaN(lat) && !isNaN(lon)) {
+          const props = headers.slice(2).map((h, i) => `<b>${h}:</b> ${values[i + 2] || ""}`).join("<br>");
+          const marker = L.circleMarker([lat, lon], {
+            radius: 7,
+            fillColor: "#FF3D00",
+            color: "#000",
+            weight: 1,
+            opacity: 1,
+            fillOpacity: 0.85
+          }).bindPopup(`<b>Lat:</b> ${lat}<br><b>Lon:</b> ${lon}<br>${props}`);
+          layer.addLayer(marker);
+          bounds.push([lat, lon]);
+        }
+      });
+
+      const id = "layer_" + Date.now();
+      dynamicLayers[id] = layer;
+      map.addLayer(layer);
+      if (bounds.length > 0) map.fitBounds(bounds);
+      addLayerToPanel(name, id, layer);
+    }
+
+    async function handleShapefile(file) {
+      const zip = await JSZip.loadAsync(file);
+      const shpFile = Object.keys(zip.files).find(name => name.endsWith(".shp"));
+      const dbfFile = Object.keys(zip.files).find(name => name.endsWith(".dbf"));
+
+      if (shpFile && dbfFile) {
+        const shpBuffer = await zip.files[shpFile].async("arraybuffer");
+        const dbfBuffer = await zip.files[dbfFile].async("arraybuffer");
+
+        const geojson = await shapefile.open(shpBuffer, dbfBuffer).then(source => source.read().then(function log(result) {
+          if (result.done) return { type: "FeatureCollection", features: [] };
+          const features = [];
+          features.push(result.value);
+          function readNext(r) {
+            if (r.done) return;
+            features.push(r.value);
+            return source.read().then(readNext);
           }
-        });
+          return source.read().then(readNext).then(() => ({ type: "FeatureCollection", features }));
+        }));
 
-        const layerId = 'csv_' + Date.now();
-        dynamicLayers[layerId] = layer;
+        const layer = L.geoJSON(geojson);
+        const id = "shp_" + Date.now();
+        dynamicLayers[id] = layer;
         map.addLayer(layer);
-        if (bounds.length > 0) map.fitBounds(bounds);
+        map.fitBounds(layer.getBounds());
+        addLayerToPanel(file.name, id, layer);
+      }
+    }
 
-        const layerList = document.getElementById('layerList');
-        const div = document.createElement('div');
-        div.className = 'layer-item';
+    document.getElementById("file-input").addEventListener("change", function (e) {
+      const files = e.target.files;
+      Array.from(files).forEach(file => {
+        const ext = file.name.split('.').pop().toLowerCase();
+        const reader = new FileReader();
 
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.checked = true;
-        checkbox.id = layerId;
-
-        const label = document.createElement('label');
-        label.htmlFor = layerId;
-        label.textContent = file.name;
-
-        checkbox.addEventListener('change', function () {
-          if (this.checked) {
+        if (ext === "csv") {
+          reader.onload = () => handleCSV(reader.result, file.name);
+          reader.readAsText(file);
+        } else if (ext === "kml" || ext === "gpx") {
+          const layer = omnivore[ext](file);
+          const id = "layer_" + Date.now();
+          layer.on('ready', () => {
+            dynamicLayers[id] = layer;
             map.addLayer(layer);
-          } else {
-            map.removeLayer(layer);
-          }
-        });
-
-        div.appendChild(checkbox);
-        div.appendChild(label);
-        layerList.appendChild(div);
-      };
-
-      reader.readAsText(file);
+            map.fitBounds(layer.getBounds());
+            addLayerToPanel(file.name, id, layer);
+          });
+        } else if (ext === "kmz") {
+          JSZip.loadAsync(file).then(zip => {
+            const kmlFile = Object.values(zip.files).find(f => f.name.endsWith(".kml"));
+            return kmlFile.async("string");
+          }).then(kmlText => {
+            const layer = omnivore.kml.parse(kmlText);
+            const id = "kmz_" + Date.now();
+            dynamicLayers[id] = layer;
+            map.addLayer(layer);
+            map.fitBounds(layer.getBounds());
+            addLayerToPanel(file.name, id, layer);
+          });
+        } else if (ext === "zip") {
+          handleShapefile(file);
+        }
+      });
     });
 
-    // Geoman Control (flotante y profesional)
+    // Herramientas Geoman
     map.pm.addControls({
       position: 'topleft',
-      drawCircle: false,
+      drawPolyline: true,
       drawMarker: false,
-      drawCircleMarker: false,
       drawPolygon: false,
+      drawCircle: false,
       drawRectangle: false,
-      drawText: false,
-      drawPolyline: true, // Solo permitir líneas para medir
       editMode: false,
       dragMode: false,
       cutPolygon: false,
       removalMode: true
     });
 
-    // Mostrar longitud al crear línea
     map.on('pm:create', e => {
       if (e.shape === 'Line') {
         const latlngs = e.layer.getLatLngs();
