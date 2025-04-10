@@ -20,6 +20,9 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
   <script src="https://unpkg.com/shapefile@0.6.6/shapefile.js"></script>
 
+  <!-- toGeoJSON -->
+  <script src="https://unpkg.com/@tmcw/togeojson@4.3.0/dist/togeojson.umd.js"></script>
+
   <style>
     html, body, #map { height: 100%; margin: 0; font-family: Arial, sans-serif; }
     #map { position: absolute; top: 0; bottom: 0; right: 0; left: 0; }
@@ -127,70 +130,6 @@
       layerList.appendChild(div);
     }
 
-    function handleCSV(content, name) {
-      const lines = content.trim().split("\n");
-      const delimiter = lines[0].includes(";") ? ";" : ",";
-      const headers = lines[0].split(delimiter);
-      const layer = L.layerGroup();
-      const bounds = [];
-
-      lines.slice(1).forEach(line => {
-        const values = line.split(delimiter);
-        const lat = parseFloat(values[0]);
-        const lon = parseFloat(values[1]);
-
-        if (!isNaN(lat) && !isNaN(lon)) {
-          const props = headers.slice(2).map((h, i) => `<b>${h}:</b> ${values[i + 2] || ""}`).join("<br>");
-          const marker = L.circleMarker([lat, lon], {
-            radius: 7,
-            fillColor: "#FF3D00",
-            color: "#000",
-            weight: 1,
-            opacity: 1,
-            fillOpacity: 0.85
-          }).bindPopup(`<b>Lat:</b> ${lat}<br><b>Lon:</b> ${lon}<br>${props}`);
-          layer.addLayer(marker);
-          bounds.push([lat, lon]);
-        }
-      });
-
-      const id = "layer_" + Date.now();
-      dynamicLayers[id] = layer;
-      map.addLayer(layer);
-      if (bounds.length > 0) map.fitBounds(bounds);
-      addLayerToPanel(name, id, layer);
-    }
-
-    async function handleShapefile(file) {
-      const zip = await JSZip.loadAsync(file);
-      const shpFile = Object.keys(zip.files).find(name => name.endsWith(".shp"));
-      const dbfFile = Object.keys(zip.files).find(name => name.endsWith(".dbf"));
-
-      if (shpFile && dbfFile) {
-        const shpBuffer = await zip.files[shpFile].async("arraybuffer");
-        const dbfBuffer = await zip.files[dbfFile].async("arraybuffer");
-
-        const geojson = await shapefile.open(shpBuffer, dbfBuffer).then(source => source.read().then(function log(result) {
-          if (result.done) return { type: "FeatureCollection", features: [] };
-          const features = [];
-          features.push(result.value);
-          function readNext(r) {
-            if (r.done) return;
-            features.push(r.value);
-            return source.read().then(readNext);
-          }
-          return source.read().then(readNext).then(() => ({ type: "FeatureCollection", features }));
-        }));
-
-        const layer = L.geoJSON(geojson);
-        const id = "shp_" + Date.now();
-        dynamicLayers[id] = layer;
-        map.addLayer(layer);
-        map.fitBounds(layer.getBounds());
-        addLayerToPanel(file.name, id, layer);
-      }
-    }
-
     document.getElementById("file-input").addEventListener("change", function (e) {
       const files = e.target.files;
       Array.from(files).forEach(file => {
@@ -198,17 +137,97 @@
         const reader = new FileReader();
 
         if (ext === "csv") {
-          reader.onload = () => handleCSV(reader.result, file.name);
+          reader.onload = () => {
+            const content = reader.result;
+            const lines = content.trim().split("\n");
+            const delimiter = lines[0].includes(";") ? ";" : ",";
+            const headers = lines[0].split(delimiter).map(h => h.toLowerCase().trim());
+            const latIdx = headers.findIndex(h => h === "lat" || h === "latitude");
+            const lonIdx = headers.findIndex(h => h === "lon" || h === "lng" || h === "long" || h === "longitude");
+
+            if (latIdx === -1 || lonIdx === -1) {
+              alert("El archivo CSV no contiene columnas 'lat' y 'lon'");
+              return;
+            }
+
+            const layer = L.layerGroup();
+            const bounds = [];
+
+            lines.slice(1).forEach(line => {
+              const values = line.split(delimiter);
+              const lat = parseFloat(values[latIdx].replace(",", "."));
+              const lon = parseFloat(values[lonIdx].replace(",", "."));
+
+              if (!isNaN(lat) && !isNaN(lon)) {
+                const props = headers.map((h, i) => `<b>${h}:</b> ${values[i] || ""}`).join("<br>");
+                const marker = L.circleMarker([lat, lon], {
+                  radius: 7,
+                  fillColor: "#FF3D00",
+                  color: "#000",
+                  weight: 1,
+                  opacity: 1,
+                  fillOpacity: 0.85
+                }).bindPopup(props);
+                layer.addLayer(marker);
+                bounds.push([lat, lon]);
+              }
+            });
+
+            const id = "csv_" + Date.now();
+            dynamicLayers[id] = layer;
+            map.addLayer(layer);
+            if (bounds.length > 0) map.fitBounds(bounds);
+            addLayerToPanel(file.name, id, layer);
+          };
           reader.readAsText(file);
-        } else if (ext === "kml" || ext === "gpx") {
-          const layer = omnivore[ext](file);
-          const id = "layer_" + Date.now();
-          layer.on('ready', () => {
+
+        } else if (ext === "gpx") {
+          reader.onload = () => {
+            const parser = new DOMParser();
+            const xml = parser.parseFromString(reader.result, "text/xml");
+            const geojson = toGeoJSON.gpx(xml);
+
+            const pointFeatures = geojson.features.filter(f => f.geometry.type === "Point");
+
+            const pointsLayer = L.geoJSON(pointFeatures, {
+              onEachFeature: (feature, layer) => {
+                let content = "";
+                if (feature.properties && Object.keys(feature.properties).length > 0) {
+                  content = Object.entries(feature.properties).map(([k, v]) => `<b>${k}:</b> ${v}`).join("<br>");
+                } else {
+                  const [lon, lat] = feature.geometry.coordinates;
+                  content = `Lat: ${lat.toFixed(5)}<br>Lon: ${lon.toFixed(5)}`;
+                }
+                layer.bindPopup(content);
+              },
+              pointToLayer: (feature, latlng) => {
+                return L.circleMarker(latlng, {
+                  radius: 6,
+                  fillColor: "#2196f3",
+                  color: "#0d47a1",
+                  weight: 1,
+                  fillOpacity: 0.9
+                });
+              }
+            });
+
+            const id = "gpx_" + Date.now();
+            dynamicLayers[id] = pointsLayer;
+            map.addLayer(pointsLayer);
+            map.fitBounds(pointsLayer.getBounds());
+            addLayerToPanel(file.name, id, pointsLayer);
+          };
+          reader.readAsText(file);
+
+        } else if (ext === "kml") {
+          const layer = omnivore.kml(file).on('ready', () => {
+            const id = "kml_" + Date.now();
             dynamicLayers[id] = layer;
             map.addLayer(layer);
             map.fitBounds(layer.getBounds());
             addLayerToPanel(file.name, id, layer);
           });
+
         } else if (ext === "kmz") {
           JSZip.loadAsync(file).then(zip => {
             const kmlFile = Object.values(zip.files).find(f => f.name.endsWith(".kml"));
@@ -221,13 +240,41 @@
             map.fitBounds(layer.getBounds());
             addLayerToPanel(file.name, id, layer);
           });
+
         } else if (ext === "zip") {
-          handleShapefile(file);
+          JSZip.loadAsync(file).then(zip => {
+            const shpFile = Object.keys(zip.files).find(name => name.endsWith(".shp"));
+            const dbfFile = Object.keys(zip.files).find(name => name.endsWith(".dbf"));
+
+            if (shpFile && dbfFile) {
+              Promise.all([
+                zip.files[shpFile].async("arraybuffer"),
+                zip.files[dbfFile].async("arraybuffer")
+              ]).then(([shpBuffer, dbfBuffer]) => {
+                shapefile.open(shpBuffer, dbfBuffer).then(source => {
+                  const features = [];
+                  source.read().then(function process(result) {
+                    if (result.done) {
+                      const geojson = { type: "FeatureCollection", features };
+                      const layer = L.geoJSON(geojson);
+                      const id = "shp_" + Date.now();
+                      dynamicLayers[id] = layer;
+                      map.addLayer(layer);
+                      map.fitBounds(layer.getBounds());
+                      addLayerToPanel(file.name, id, layer);
+                      return;
+                    }
+                    features.push(result.value);
+                    return source.read().then(process);
+                  });
+                });
+              });
+            }
+          });
         }
       });
     });
 
-    // Herramientas Geoman
     map.pm.addControls({
       position: 'topleft',
       drawPolyline: true,
