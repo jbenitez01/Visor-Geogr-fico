@@ -13,9 +13,6 @@
   <link href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.13.0/dist/leaflet-geoman.css" rel="stylesheet">
   <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.13.0/dist/leaflet-geoman.min.js"></script>
 
-  <!-- Omnivore (KML, GPX, etc.) -->
-  <script src="https://unpkg.com/leaflet-omnivore@0.3.4/leaflet-omnivore.min.js"></script>
-
   <!-- JSZip + shapefile-js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
   <script src="https://unpkg.com/shapefile@0.6.6/shapefile.js"></script>
@@ -220,20 +217,72 @@
           reader.readAsText(file);
 
         } else if (ext === "kml") {
-          const layer = omnivore.kml(file).on('ready', () => {
+          reader.onload = () => {
+            const parser = new DOMParser();
+            const xml = parser.parseFromString(reader.result, "text/xml");
+            const geojson = toGeoJSON.kml(xml);
+
+            const layer = L.geoJSON(geojson, {
+              onEachFeature: (feature, layer) => {
+                let content = "";
+                if (feature.properties && Object.keys(feature.properties).length > 0) {
+                  content = Object.entries(feature.properties).map(([k, v]) => `<b>${k}:</b> ${v}`).join("<br>");
+                } else if (feature.geometry.type === "Point") {
+                  const [lon, lat] = feature.geometry.coordinates;
+                  content = `Lat: ${lat.toFixed(5)}<br>Lon: ${lon.toFixed(5)}`;
+                }
+                if (content) layer.bindPopup(content);
+              },
+              pointToLayer: (feature, latlng) => {
+                return L.circleMarker(latlng, {
+                  radius: 6,
+                  fillColor: "#9c27b0",
+                  color: "#4a148c",
+                  weight: 1,
+                  fillOpacity: 0.9
+                });
+              }
+            });
+
             const id = "kml_" + Date.now();
             dynamicLayers[id] = layer;
             map.addLayer(layer);
             map.fitBounds(layer.getBounds());
             addLayerToPanel(file.name, id, layer);
-          });
+          };
+          reader.readAsText(file);
 
         } else if (ext === "kmz") {
           JSZip.loadAsync(file).then(zip => {
             const kmlFile = Object.values(zip.files).find(f => f.name.endsWith(".kml"));
             return kmlFile.async("string");
           }).then(kmlText => {
-            const layer = omnivore.kml.parse(kmlText);
+            const parser = new DOMParser();
+            const xml = parser.parseFromString(kmlText, "text/xml");
+            const geojson = toGeoJSON.kml(xml);
+
+            const layer = L.geoJSON(geojson, {
+              onEachFeature: (feature, layer) => {
+                let content = "";
+                if (feature.properties && Object.keys(feature.properties).length > 0) {
+                  content = Object.entries(feature.properties).map(([k, v]) => `<b>${k}:</b> ${v}`).join("<br>");
+                } else if (feature.geometry.type === "Point") {
+                  const [lon, lat] = feature.geometry.coordinates;
+                  content = `Lat: ${lat.toFixed(5)}<br>Lon: ${lon.toFixed(5)}`;
+                }
+                if (content) layer.bindPopup(content);
+              },
+              pointToLayer: (feature, latlng) => {
+                return L.circleMarker(latlng, {
+                  radius: 6,
+                  fillColor: "#f44336",
+                  color: "#b71c1c",
+                  weight: 1,
+                  fillOpacity: 0.9
+                });
+              }
+            });
+
             const id = "kmz_" + Date.now();
             dynamicLayers[id] = layer;
             map.addLayer(layer);
@@ -256,7 +305,12 @@
                   source.read().then(function process(result) {
                     if (result.done) {
                       const geojson = { type: "FeatureCollection", features };
-                      const layer = L.geoJSON(geojson);
+                      const layer = L.geoJSON(geojson, {
+                        onEachFeature: (feature, layer) => {
+                          const props = Object.entries(feature.properties).map(([k, v]) => `<b>${k}:</b> ${v}`).join("<br>");
+                          if (props) layer.bindPopup(props);
+                        }
+                      });
                       const id = "shp_" + Date.now();
                       dynamicLayers[id] = layer;
                       map.addLayer(layer);
