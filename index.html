@@ -1,358 +1,227 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="utf-8" />
-  <title>Visor Geográfico Profesional</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-  <!-- Leaflet -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
-
-  <!-- Leaflet Geoman -->
-  <link href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.13.0/dist/leaflet-geoman.css" rel="stylesheet">
-  <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.13.0/dist/leaflet-geoman.min.js"></script>
-
-  <!-- JSZip + shapefile-js -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
-  <script src="https://unpkg.com/shapefile@0.6.6/shapefile.js"></script>
-
-  <!-- toGeoJSON -->
-  <script src="https://unpkg.com/@tmcw/togeojson@4.3.0/dist/togeojson.umd.js"></script>
-
+  <meta charset="UTF-8">
+  <title>Visor HEIC con Descripción Editable y Ubicación Manual</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
-    html, body, #map { height: 100%; margin: 0; font-family: Arial, sans-serif; }
-    #map { position: absolute; top: 0; bottom: 0; right: 0; left: 0; }
+    #map { height: 100vh; width: 100%; }
 
-    #layer-panel {
+    #controls {
       position: absolute;
-      bottom: 20px;
-      left: 20px;
       z-index: 1000;
-      background: #ffffffee;
-      padding: 12px;
+      background: white;
+      padding: 10px;
+      border: 1px solid #ccc;
+      top: 10px;
+      left: 10px;
       border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-      max-height: 250px;
-      overflow-y: auto;
-      width: 230px;
+      box-shadow: 0 0 4px rgba(0,0,0,0.3);
+      font-family: sans-serif;
     }
 
-    #layer-panel h3 { margin: 0 0 10px; font-size: 15px; }
-
-    .layer-item { margin-bottom: 6px; }
-
-    .upload-btn {
-      display: inline-block;
-      padding: 6px 10px;
-      background-color: #007bff;
-      color: white;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 13px;
-      margin-top: 8px;
+    #upload {
+      display: block;
+      margin-bottom: 5px;
     }
 
-    .upload-btn:hover { background-color: #0056b3; }
+    #img-modal {
+      display: none;
+      position: fixed;
+      z-index: 2000;
+      left: 0; top: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.8);
+      justify-content: center;
+      align-items: center;
+    }
 
-    #file-input { display: none; }
+    #img-modal img {
+      max-width: 90vw;
+      max-height: 90vh;
+      border-radius: 12px;
+      box-shadow: 0 0 20px black;
+    }
 
-    .leaflet-control-zoom { margin-top: 60px; }
+    #img-modal:active {
+      display: none;
+    }
   </style>
 </head>
 <body>
-  <div id="map"></div>
 
-  <div id="layer-panel">
-    <h3>Capas cargadas</h3>
-    <div id="layerList"></div>
-    <label for="file-input" class="upload-btn">+ Cargar capa</label>
-    <input type="file" id="file-input" multiple accept=".csv,.kml,.kmz,.gpx,.zip" />
-  </div>
+<div id="controls">
+  <input type="file" id="upload" accept=".heic,image/*" multiple />
+</div>
 
-  <script>
-    const map = L.map('map').setView([-38, -64], 5);
+<div id="map"></div>
 
-    const googleSat = L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
-      subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
-      attribution: "Google",
-      maxZoom: 20
-    }).addTo(map);
+<div id="img-modal" onclick="this.style.display='none'">
+  <img id="modal-image" src="" alt="Vista ampliada" />
+</div>
 
-    const ign = L.tileLayer.wms("https://wms.ign.gob.ar/geoserver/ows?", {
-      layers: 'capabaseargenmap',
-      format: 'image/png',
-      transparent: false,
-      attribution: "IGN"
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.3/dist/heic2any.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
+
+<script>
+  const map = L.map('map').setView([-38, -65], 4);
+
+  const googleSat = L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+    subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+    attribution: "Google",
+    maxZoom: 20
+  }).addTo(map);
+
+  let pendingImage = null;
+
+  document.getElementById('upload').addEventListener('change', async function (event) {
+    const files = event.target.files;
+
+    for (let file of files) {
+      if (!file.type.startsWith("image/") && !file.name.toLowerCase().endsWith(".heic")) continue;
+
+      let imageBlob = file;
+      let exifData;
+
+      try {
+        exifData = await exifr.gps(file);
+      } catch (err) {
+        console.warn("No se pudo leer EXIF de", file.name, err);
+      }
+
+      if (file.name.toLowerCase().endsWith(".heic")) {
+        try {
+          const converted = await heic2any({
+            blob: file,
+            toType: "image/jpeg",
+            quality: 0.9
+          });
+          imageBlob = converted;
+        } catch (err) {
+          alert("Error al convertir HEIC.");
+          console.error(err);
+          continue;
+        }
+      }
+
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        const imgDataUrl = e.target.result;
+
+        if (exifData && exifData.latitude && exifData.longitude) {
+          const { latitude, longitude } = exifData;
+          const marker = L.marker([latitude, longitude]).addTo(map);
+
+          let description = "";
+
+          const generatePopupHTML = () => `
+            <div>
+              <img src="${imgDataUrl}" style="max-width: 160px; border-radius: 6px; cursor:pointer;" onclick="showFullImage('${imgDataUrl}')" />
+              <p id="desc-${marker._leaflet_id}" style="margin-top:5px;">${description || "<i>Sin descripción</i>"}</p>
+              <button onclick="editDescription(${marker._leaflet_id})" style="margin-top: 4px; padding: 4px 6px;">Editar descripción</button>
+            </div>
+          `;
+
+          const popup = L.popup().setContent(generatePopupHTML());
+          marker.bindPopup(popup);
+
+          marker.on('popupopen', () => {
+            popup.setContent(generatePopupHTML());
+          });
+
+          popup.setContent(generatePopupHTML());
+          marker.openPopup();
+
+          map.setView([latitude, longitude], 14);
+
+          window[`marker_${marker._leaflet_id}`] = {
+            marker,
+            imgDataUrl,
+            get description() { return description; },
+            set description(val) { description = val; }
+          };
+        } else {
+          if (pendingImage) {
+            alert("Ya hay una imagen pendiente de ubicación. Ubicala en el mapa antes de cargar otra.");
+            return;
+          }
+
+          pendingImage = {
+            imgDataUrl: imgDataUrl
+          };
+
+          alert("Esta imagen no contiene datos de ubicación. Hacé clic en el mapa para ubicarla.");
+        }
+      };
+
+      reader.readAsDataURL(imageBlob);
+    }
+  });
+
+  map.on('click', (e) => {
+    if (!pendingImage) return;
+
+    const { lat, lng } = e.latlng;
+    const marker = L.marker([lat, lng]).addTo(map);
+
+    let description = "";
+
+    const generatePopupHTML = () => `
+      <div>
+        <img src="${pendingImage.imgDataUrl}" style="max-width: 160px; border-radius: 6px; cursor:pointer;" onclick="showFullImage('${pendingImage.imgDataUrl}')" />
+        <p id="desc-${marker._leaflet_id}" style="margin-top:5px;">${description || "<i>Sin descripción</i>"}</p>
+        <button onclick="editDescription(${marker._leaflet_id})" style="margin-top: 4px; padding: 4px 6px;">Editar descripción</button>
+      </div>
+    `;
+
+    const popup = L.popup().setContent(generatePopupHTML());
+    marker.bindPopup(popup);
+
+    marker.on('popupopen', () => {
+      popup.setContent(generatePopupHTML());
     });
 
-    const vientoCanada = L.tileLayer.wms("https://geoappext.nrcan.gc.ca/arcgis/services/Energy/clean_energy_wind_potential/MapServer/WMSServer", {
-      layers: "2",
-      format: "image/png",
-      transparent: true,
-      attribution: "Natural Resources Canada"
-    });
+    popup.setContent(generatePopupHTML());
+    marker.openPopup();
 
-    const baseMaps = {
-      "Google Satélite": googleSat,
-      "IGN": ign,
-      "Vientos Canadá": vientoCanada
+    map.setView([lat, lng], 14);
+
+    window[`marker_${marker._leaflet_id}`] = {
+      marker,
+      imgDataUrl: pendingImage.imgDataUrl,
+      get description() { return description; },
+      set description(val) { description = val; }
     };
 
-    L.control.layers(baseMaps, null, { position: "topright" }).addTo(map);
+    pendingImage = null;
+  });
 
-    const dynamicLayers = {};
+  function editDescription(id) {
+    const data = window[`marker_${id}`];
+    if (!data) return;
 
-    function addLayerToPanel(name, layerId, layer) {
-      const layerList = document.getElementById('layerList');
-      const div = document.createElement('div');
-      div.className = 'layer-item';
-
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.checked = true;
-      checkbox.id = layerId;
-
-      const label = document.createElement('label');
-      label.htmlFor = layerId;
-      label.textContent = name;
-
-      checkbox.addEventListener('change', function () {
-        if (this.checked) map.addLayer(layer);
-        else map.removeLayer(layer);
-      });
-
-      div.appendChild(checkbox);
-      div.appendChild(label);
-      layerList.appendChild(div);
+    const nueva = prompt("Editar descripción:", data.description);
+    if (nueva !== null) {
+      data.description = nueva;
+      const marker = data.marker;
+      marker.getPopup().setContent(`
+        <div>
+          <img src="${data.imgDataUrl}" style="max-width: 160px; border-radius: 6px; cursor:pointer;" onclick="showFullImage('${data.imgDataUrl}')" />
+          <p id="desc-${id}" style="margin-top:5px;">${nueva || "<i>Sin descripción</i>"}</p>
+          <button onclick="editDescription(${id})" style="margin-top: 4px; padding: 4px 6px;">Editar descripción</button>
+        </div>
+      `);
     }
+  }
 
-    document.getElementById("file-input").addEventListener("change", function (e) {
-      const files = e.target.files;
-      Array.from(files).forEach(file => {
-        const ext = file.name.split('.').pop().toLowerCase();
-        const reader = new FileReader();
+  function showFullImage(url) {
+    const modal = document.getElementById('img-modal');
+    const img = document.getElementById('modal-image');
+    img.src = url;
+    modal.style.display = 'flex';
+  }
+</script>
 
-        if (ext === "csv") {
-          reader.onload = () => {
-            const content = reader.result;
-            const lines = content.trim().split("\n");
-            const delimiter = lines[0].includes(";") ? ";" : ",";
-            const headers = lines[0].split(delimiter).map(h => h.toLowerCase().trim());
-            const latIdx = headers.findIndex(h => h === "lat" || h === "latitude");
-            const lonIdx = headers.findIndex(h => h === "lon" || h === "lng" || h === "long" || h === "longitude");
-
-            if (latIdx === -1 || lonIdx === -1) {
-              alert("El archivo CSV no contiene columnas 'lat' y 'lon'");
-              return;
-            }
-
-            const layer = L.layerGroup();
-            const bounds = [];
-
-            lines.slice(1).forEach(line => {
-              const values = line.split(delimiter);
-              const lat = parseFloat(values[latIdx].replace(",", "."));
-              const lon = parseFloat(values[lonIdx].replace(",", "."));
-
-              if (!isNaN(lat) && !isNaN(lon)) {
-                const props = headers.map((h, i) => `<b>${h}:</b> ${values[i] || ""}`).join("<br>");
-                const marker = L.circleMarker([lat, lon], {
-                  radius: 7,
-                  fillColor: "#FF3D00",
-                  color: "#000",
-                  weight: 1,
-                  opacity: 1,
-                  fillOpacity: 0.85
-                }).bindPopup(props);
-                layer.addLayer(marker);
-                bounds.push([lat, lon]);
-              }
-            });
-
-            const id = "csv_" + Date.now();
-            dynamicLayers[id] = layer;
-            map.addLayer(layer);
-            if (bounds.length > 0) map.fitBounds(bounds);
-            addLayerToPanel(file.name, id, layer);
-          };
-          reader.readAsText(file);
-
-        } else if (ext === "gpx") {
-          reader.onload = () => {
-            const parser = new DOMParser();
-            const xml = parser.parseFromString(reader.result, "text/xml");
-            const geojson = toGeoJSON.gpx(xml);
-
-            const pointFeatures = geojson.features.filter(f => f.geometry.type === "Point");
-
-            const pointsLayer = L.geoJSON(pointFeatures, {
-              onEachFeature: (feature, layer) => {
-                let content = "";
-                if (feature.properties && Object.keys(feature.properties).length > 0) {
-                  content = Object.entries(feature.properties).map(([k, v]) => `<b>${k}:</b> ${v}`).join("<br>");
-                } else {
-                  const [lon, lat] = feature.geometry.coordinates;
-                  content = `Lat: ${lat.toFixed(5)}<br>Lon: ${lon.toFixed(5)}`;
-                }
-                layer.bindPopup(content);
-              },
-              pointToLayer: (feature, latlng) => {
-                return L.circleMarker(latlng, {
-                  radius: 6,
-                  fillColor: "#2196f3",
-                  color: "#0d47a1",
-                  weight: 1,
-                  fillOpacity: 0.9
-                });
-              }
-            });
-
-            const id = "gpx_" + Date.now();
-            dynamicLayers[id] = pointsLayer;
-            map.addLayer(pointsLayer);
-            map.fitBounds(pointsLayer.getBounds());
-            addLayerToPanel(file.name, id, pointsLayer);
-          };
-          reader.readAsText(file);
-
-        } else if (ext === "kml") {
-          reader.onload = () => {
-            const parser = new DOMParser();
-            const xml = parser.parseFromString(reader.result, "text/xml");
-            const geojson = toGeoJSON.kml(xml);
-
-            const layer = L.geoJSON(geojson, {
-              onEachFeature: (feature, layer) => {
-                let content = "";
-                if (feature.properties && Object.keys(feature.properties).length > 0) {
-                  content = Object.entries(feature.properties).map(([k, v]) => `<b>${k}:</b> ${v}`).join("<br>");
-                } else if (feature.geometry.type === "Point") {
-                  const [lon, lat] = feature.geometry.coordinates;
-                  content = `Lat: ${lat.toFixed(5)}<br>Lon: ${lon.toFixed(5)}`;
-                }
-                if (content) layer.bindPopup(content);
-              },
-              pointToLayer: (feature, latlng) => {
-                return L.circleMarker(latlng, {
-                  radius: 6,
-                  fillColor: "#9c27b0",
-                  color: "#4a148c",
-                  weight: 1,
-                  fillOpacity: 0.9
-                });
-              }
-            });
-
-            const id = "kml_" + Date.now();
-            dynamicLayers[id] = layer;
-            map.addLayer(layer);
-            map.fitBounds(layer.getBounds());
-            addLayerToPanel(file.name, id, layer);
-          };
-          reader.readAsText(file);
-
-        } else if (ext === "kmz") {
-          JSZip.loadAsync(file).then(zip => {
-            const kmlFile = Object.values(zip.files).find(f => f.name.endsWith(".kml"));
-            return kmlFile.async("string");
-          }).then(kmlText => {
-            const parser = new DOMParser();
-            const xml = parser.parseFromString(kmlText, "text/xml");
-            const geojson = toGeoJSON.kml(xml);
-
-            const layer = L.geoJSON(geojson, {
-              onEachFeature: (feature, layer) => {
-                let content = "";
-                if (feature.properties && Object.keys(feature.properties).length > 0) {
-                  content = Object.entries(feature.properties).map(([k, v]) => `<b>${k}:</b> ${v}`).join("<br>");
-                } else if (feature.geometry.type === "Point") {
-                  const [lon, lat] = feature.geometry.coordinates;
-                  content = `Lat: ${lat.toFixed(5)}<br>Lon: ${lon.toFixed(5)}`;
-                }
-                if (content) layer.bindPopup(content);
-              },
-              pointToLayer: (feature, latlng) => {
-                return L.circleMarker(latlng, {
-                  radius: 6,
-                  fillColor: "#f44336",
-                  color: "#b71c1c",
-                  weight: 1,
-                  fillOpacity: 0.9
-                });
-              }
-            });
-
-            const id = "kmz_" + Date.now();
-            dynamicLayers[id] = layer;
-            map.addLayer(layer);
-            map.fitBounds(layer.getBounds());
-            addLayerToPanel(file.name, id, layer);
-          });
-
-        } else if (ext === "zip") {
-          JSZip.loadAsync(file).then(zip => {
-            const shpFile = Object.keys(zip.files).find(name => name.endsWith(".shp"));
-            const dbfFile = Object.keys(zip.files).find(name => name.endsWith(".dbf"));
-
-            if (shpFile && dbfFile) {
-              Promise.all([
-                zip.files[shpFile].async("arraybuffer"),
-                zip.files[dbfFile].async("arraybuffer")
-              ]).then(([shpBuffer, dbfBuffer]) => {
-                shapefile.open(shpBuffer, dbfBuffer).then(source => {
-                  const features = [];
-                  source.read().then(function process(result) {
-                    if (result.done) {
-                      const geojson = { type: "FeatureCollection", features };
-                      const layer = L.geoJSON(geojson, {
-                        onEachFeature: (feature, layer) => {
-                          const props = Object.entries(feature.properties).map(([k, v]) => `<b>${k}:</b> ${v}`).join("<br>");
-                          if (props) layer.bindPopup(props);
-                        }
-                      });
-                      const id = "shp_" + Date.now();
-                      dynamicLayers[id] = layer;
-                      map.addLayer(layer);
-                      map.fitBounds(layer.getBounds());
-                      addLayerToPanel(file.name, id, layer);
-                      return;
-                    }
-                    features.push(result.value);
-                    return source.read().then(process);
-                  });
-                });
-              });
-            }
-          });
-        }
-      });
-    });
-
-    map.pm.addControls({
-      position: 'topleft',
-      drawPolyline: true,
-      drawMarker: false,
-      drawPolygon: false,
-      drawCircle: false,
-      drawRectangle: false,
-      editMode: false,
-      dragMode: false,
-      cutPolygon: false,
-      removalMode: true
-    });
-
-    map.on('pm:create', e => {
-      if (e.shape === 'Line') {
-        const latlngs = e.layer.getLatLngs();
-        let total = 0;
-        for (let i = 1; i < latlngs.length; i++) {
-          total += latlngs[i - 1].distanceTo(latlngs[i]);
-        }
-        const km = (total / 1000).toFixed(2);
-        e.layer.bindPopup(`Distancia: ${km} km`).openPopup();
-      }
-    });
-  </script>
 </body>
 </html>
