@@ -15,7 +15,7 @@
       padding: 10px;
       border: 1px solid #ccc;
       top: 10px;
-      left: 10px;
+      right: 10px;
       border-radius: 8px;
       box-shadow: 0 0 4px rgba(0,0,0,0.3);
       font-family: sans-serif;
@@ -42,10 +42,6 @@
       border-radius: 12px;
       box-shadow: 0 0 20px black;
     }
-
-    #img-modal:active {
-      display: none;
-    }
   </style>
 </head>
 <body>
@@ -65,6 +61,8 @@
 <script src="https://cdn.jsdelivr.net/npm/exifr/dist/lite.umd.js"></script>
 
 <script>
+  const baseUrl = "http://localhost:3000";  // base del servidor Node.js
+
   const map = L.map('map').setView([-38, -65], 4);
 
   const googleSat = L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
@@ -105,7 +103,24 @@
         }
       }
 
-      const reader = new FileReader();
+
+   // Cargar imágenes desde el servidor
+    fetch('http://localhost:3000/get-images')
+      .then(response => response.json())
+      .then(images => {
+        images.forEach(img => {
+          if (img.latitude && img.longitude) {
+            const marker = L.marker([img.latitude, img.longitude]).addTo(map);
+            marker.bindPopup(`
+              <img src="http://localhost:3000${img.imageUrl}" width="150"><br>
+              <strong>${img.description}</strong>
+            `);
+          }
+        });
+      })
+      .catch(error => console.error('Error al cargar imágenes:', error));
+     
+ const reader = new FileReader();
       reader.onload = function (e) {
         const imgDataUrl = e.target.result;
 
@@ -115,24 +130,20 @@
 
           let description = "";
 
-          const generatePopupHTML = () => `
-            <div>
+          const generatePopupHTML = () => 
+            `<div>
               <img src="${imgDataUrl}" style="max-width: 160px; border-radius: 6px; cursor:pointer;" onclick="showFullImage('${imgDataUrl}')" />
               <p id="desc-${marker._leaflet_id}" style="margin-top:5px;">${description || "<i>Sin descripción</i>"}</p>
               <button onclick="editDescription(${marker._leaflet_id})" style="margin-top: 4px; padding: 4px 6px;">Editar descripción</button>
-            </div>
-          `;
+            </div>`;
 
-          const popup = L.popup().setContent(generatePopupHTML());
-          marker.bindPopup(popup);
+          marker.bindPopup(generatePopupHTML());
 
           marker.on('popupopen', () => {
-            popup.setContent(generatePopupHTML());
+            marker.getPopup().setContent(generatePopupHTML());
           });
 
-          popup.setContent(generatePopupHTML());
           marker.openPopup();
-
           map.setView([latitude, longitude], 14);
 
           window[`marker_${marker._leaflet_id}`] = {
@@ -141,25 +152,45 @@
             get description() { return description; },
             set description(val) { description = val; }
           };
+
+          guardarImagen({
+            id: Date.now(),
+            description: description,
+            location: { lat: latitude, lng: longitude },
+            imageUrl: imgDataUrl
+          });
+
         } else {
           if (pendingImage) {
             alert("Ya hay una imagen pendiente de ubicación. Ubicala en el mapa antes de cargar otra.");
             return;
           }
 
-          pendingImage = {
-            imgDataUrl: imgDataUrl
-          };
-
+          pendingImage = { imgDataUrl: imgDataUrl };
           alert("Esta imagen no contiene datos de ubicación. Hacé clic en el mapa para ubicarla.");
         }
       };
-
       reader.readAsDataURL(imageBlob);
     }
   });
 
-  map.on('click', (e) => {
+// Cargar imágenes desde el servidor
+    fetch('http://localhost:3000/get-images')
+      .then(response => response.json())
+      .then(images => {
+        images.forEach(img => {
+          if (img.latitude && img.longitude) {
+            const marker = L.marker([img.latitude, img.longitude]).addTo(map);
+            marker.bindPopup(`
+              <img src="http://localhost:3000${img.imageUrl}" width="150"><br>
+              <strong>${img.description}</strong>
+            `);
+          }
+        });
+      })
+      .catch(error => console.error('Error al cargar imágenes:', error));
+  
+map.on('click', (e) => {
     if (!pendingImage) return;
 
     const { lat, lng } = e.latlng;
@@ -167,24 +198,20 @@
 
     let description = "";
 
-    const generatePopupHTML = () => `
-      <div>
+    const generatePopupHTML = () =>
+      `<div>
         <img src="${pendingImage.imgDataUrl}" style="max-width: 160px; border-radius: 6px; cursor:pointer;" onclick="showFullImage('${pendingImage.imgDataUrl}')" />
         <p id="desc-${marker._leaflet_id}" style="margin-top:5px;">${description || "<i>Sin descripción</i>"}</p>
         <button onclick="editDescription(${marker._leaflet_id})" style="margin-top: 4px; padding: 4px 6px;">Editar descripción</button>
-      </div>
-    `;
+      </div>`;
 
-    const popup = L.popup().setContent(generatePopupHTML());
-    marker.bindPopup(popup);
+    marker.bindPopup(generatePopupHTML());
 
     marker.on('popupopen', () => {
-      popup.setContent(generatePopupHTML());
+      marker.getPopup().setContent(generatePopupHTML());
     });
 
-    popup.setContent(generatePopupHTML());
     marker.openPopup();
-
     map.setView([lat, lng], 14);
 
     window[`marker_${marker._leaflet_id}`] = {
@@ -194,26 +221,47 @@
       set description(val) { description = val; }
     };
 
+    guardarImagen({
+      id: Date.now(),
+      description: description,
+      location: { lat, lng },
+      imageUrl: pendingImage.imgDataUrl
+    });
+
     pendingImage = null;
   });
 
   function editDescription(id) {
-    const data = window[`marker_${id}`];
-    if (!data) return;
+  const data = window[`marker_${id}`];
+  if (!data) return;
 
-    const nueva = prompt("Editar descripción:", data.description);
-    if (nueva !== null) {
-      data.description = nueva;
-      const marker = data.marker;
-      marker.getPopup().setContent(`
-        <div>
-          <img src="${data.imgDataUrl}" style="max-width: 160px; border-radius: 6px; cursor:pointer;" onclick="showFullImage('${data.imgDataUrl}')" />
-          <p id="desc-${id}" style="margin-top:5px;">${nueva || "<i>Sin descripción</i>"}</p>
-          <button onclick="editDescription(${id})" style="margin-top: 4px; padding: 4px 6px;">Editar descripción</button>
-        </div>
-      `);
-    }
+  // Solicita la nueva descripción al usuario
+  const nueva = prompt("Editar descripción:", data.description);
+  if (nueva !== null) {
+    // Actualiza la descripción en el marcador
+    data.description = nueva;
+
+    const marker = data.marker;
+    marker.getPopup().setContent(
+      `<div>
+        <img src="${data.imgDataUrl}" style="max-width: 160px; border-radius: 6px; cursor:pointer;" onclick="showFullImage('${data.imgDataUrl}')" />
+        <p id="desc-${id}" style="margin-top:5px;">${nueva || "<i>Sin descripción</i>"}</p>
+        <button onclick="editDescription(${id})" style="margin-top: 4px; padding: 4px 6px;">Editar descripción</button>
+      </div>`
+    );
+
+    // Actualiza el servidor con la nueva descripción
+    fetch(`${baseUrl}/update-description/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: nueva })
+    })
+    .then(response => response.text())
+    .then(data => console.log("Descripción actualizada:", data))
+    .catch(error => console.error("Error al actualizar la descripción:", error));
   }
+}
+
 
   function showFullImage(url) {
     const modal = document.getElementById('img-modal');
@@ -221,7 +269,57 @@
     img.src = url;
     modal.style.display = 'flex';
   }
+
+  function guardarImagen(imageData) {
+    fetch(`${baseUrl}/save-image`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(imageData)
+    })
+    .then(response => response.text())
+    .then(data => console.log("Respuesta del servidor:", data))
+    .catch(error => console.error('Error al enviar los datos:', error));
+  }
+
+  function guardarTest() {
+    const imageData = {
+      id: Date.now(),
+      description: "Esta es una prueba de guardado",
+      location: { lat: -34.6037, lng: -58.3816 },
+      imageUrl: "https://via.placeholder.com/300"
+    };
+
+    fetch(`${baseUrl}/save-image`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(imageData)
+    })
+    .then(response => response.text())
+    .then(data => {
+      console.log("Respuesta del servidor:", data);
+      alert("Datos enviados correctamente.");
+    })
+    .catch(error => console.error('Error al enviar los datos:', error));
+  }
+
+  window.onload = function() {
+    fetch(`${baseUrl}/get-images`)
+      .then(response => response.json())
+      .then(data => {
+        data.forEach(image => {
+          const marker = L.marker([image.location.lat, image.location.lng]).addTo(map);
+          const popupContent = 
+            `<div>
+              <img src="${baseUrl}${image.imageUrl}" style="max-width: 160px; border-radius: 6px; cursor:pointer;" onclick="showFullImage('${baseUrl}${image.imageUrl}')" />
+              <p>${image.description || "<i>Sin descripción</i>"}</p>
+            </div>`;
+          marker.bindPopup(popupContent);
+        });
+      })
+      .catch(error => console.error('Error al cargar imágenes:', error));
+  };
 </script>
 
 </body>
 </html>
+
