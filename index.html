@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Visor de Sitios</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Estilos personalizados -->
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+    }
+    #map {
+      height: 100vh;
+      width: 100%;
+    }
+    .sidebar {
+      transition: transform 0.3s ease-in-out;
+    }
+    .sidebar-hidden {
+      transform: translateX(100%);
+    }
+  </style>
+</head>
+
+<body class="bg-gray-900 text-white">
+  <!-- PANEL LATERAL -->
+  <aside id="sidebar" class="fixed top-0 right-0 w-full md:w-1/3 h-full bg-white text-black z-[9999] sidebar sidebar-hidden shadow-xl overflow-y-auto">
+
+    <div class="flex justify-between items-center p-4 border-b bg-gray-200">
+      <h2 id="sidebar-title" class="font-bold text-lg">Ficha</h2>
+      <button onclick="closeSidebar()" class="text-sm text-red-600 hover:underline">Cerrar ✖</button>
+    </div>
+    <div class="p-4">
+      <iframe id="pdf-viewer" class="w-full h-[80vh]" frameborder="0" allowfullscreen></iframe>
+    </div>
+  </aside>
+
+<!-- Logo superior -->
+<div class="absolute bottom-4 left-4 z-[1000] bg-white bg-opacity-90 rounded shadow-md p-2">
+  <img src="img/logo.png" alt="Logo" class="h-12 w-auto">
+</div>
+
+  <!-- MAPA -->
+  <div id="map"></div>
+
+  <!-- SCRIPT -->
+  <script>
+    // Inicialización del mapa
+    const map = L.map('map').setView([-24, -65], 5);
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Visor de Sitios</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+    }
+    #map {
+      height: 100vh;
+      width: 100%;
+    }
+    .sidebar {
+      transition: transform 0.3s ease-in-out;
+    }
+    .sidebar-hidden {
+      transform: translateX(100%);
+    }
+  </style>
+</head>
+
+<body class="bg-gray-900 text-white">
+  <!-- PANEL LATERAL -->
+  <aside id="sidebar" class="fixed top-0 right-0 w-full md:w-1/3 h-full bg-white text-black z-[9999] sidebar sidebar-hidden shadow-xl overflow-y-auto">
+    <div class="flex justify-between items-center p-4 border-b bg-gray-200">
+      <h2 id="sidebar-title" class="font-bold text-lg">Ficha</h2>
+      <button onclick="closeSidebar()" class="text-sm text-red-600 hover:underline">Cerrar ✖</button>
+    </div>
+    <div class="p-4">
+      <iframe id="pdf-viewer" class="w-full h-[80vh]" frameborder="0" allowfullscreen></iframe>
+    </div>
+  </aside>
+
+  <!-- Logo -->
+  <div class="absolute bottom-4 left-4 z-[1000] bg-white bg-opacity-90 rounded shadow-md p-2">
+    <img src="img/logo.png" alt="Logo" class="h-12 w-auto">
+  </div>
+
+  <!-- MAPA -->
+  <div id="map"></div>
+
+  <!-- SCRIPT -->
+  <script>
+    const map = L.map('map').setView([-23, -63], 5);
+
+    // Capas base
+    const claro = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap & CARTO',
+      subdomains: 'abcd',
+      maxZoom: 19
+    });
+
+    const oscuro = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap & CARTO',
+      subdomains: 'abcd',
+      maxZoom: 19
+    });
+
+    const satelite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Esri & contributors'
+    });
+
+    const ign = L.tileLayer('https://wms.ign.gob.ar/geoserver/gwc/service/tms/1.0.0/capabaseargenmap@EPSG%3A3857@png/{z}/{x}/{-y}.png', {
+      attribution: '&copy; IGN Argentina',
+      maxZoom: 18,
+      tms: true
+    });
+
+    // Añadir una capa base por defecto
+    ign.addTo(map);
+
+    const baseMaps = {
+      "Claro": claro,
+      "Oscuro": oscuro,
+      "Satélite": satelite,
+      "IGN Argentina": ign
+    };
+
+    L.control.layers(baseMaps, null, { position: 'topleft' }).addTo(map);
+
+    map.on('baselayerchange', function () {
+      // Evita cerrar la sidebar al cambiar de mapa base
+    });
+
+    function openSidebar(title, pdfLink) {
+      const viewer = document.getElementById('pdf-viewer');
+      const embed = pdfLink.replace("/view", "/preview");
+      document.getElementById('sidebar-title').innerText = title;
+
+      if (viewer.src !== embed) {
+        viewer.src = embed;
+      }
+
+      document.getElementById('sidebar').classList.remove('sidebar-hidden');
+    }
+
+    function closeSidebar() {
+      const sidebar = document.getElementById('sidebar');
+      if (!sidebar.classList.contains('sidebar-hidden')) {
+        sidebar.classList.add('sidebar-hidden');
+        setTimeout(() => {
+          document.getElementById('pdf-viewer').src = '';
+        }, 300);
+      }
+    }
+
+    fetch('data/sitios.geojson')
+      .then(response => response.json())
+      .then(data => {
+        const geoLayer = L.geoJSON(data, {
+          pointToLayer: function (feature, latlng) {
+            return L.circleMarker(latlng, {
+              radius: 6,
+              fillColor: "#38bdf8",
+              color: "#fff",
+              weight: 1,
+              opacity: 1,
+              fillOpacity: 0.9
+            });
+          },
+          onEachFeature: function (feature, layer) {
+            const nombre = feature.properties.url || "Sitio sin nombre";
+            const link = feature.properties.url_1;
+
+            layer.bindPopup(`<div class="text-base font-semibold">${nombre}</div>`);
+
+            layer.on('click', () => {
+              if (link) {
+                openSidebar(nombre, link);
+              } else {
+                alert("Este sitio no tiene ficha disponible.");
+              }
+            });
+          }
+        }).addTo(map);
+
+        map.fitBounds(geoLayer.getBounds(), {
+  padding: [10, 10], // píxeles alrededor
+  maxZoom: 14        // (opcional) no hacer zoom excesivo
+});
+      })
+      .catch(error => console.error('Error cargando GeoJSON:', error));
+  </script>
+</body>
+</html>
+
